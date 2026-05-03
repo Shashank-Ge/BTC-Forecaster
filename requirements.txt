@@ -2,7 +2,7 @@ streamlit
 requests
 numpy
 pandas
-matplotlib
+plotly
 arch
 scipy
 gspread
