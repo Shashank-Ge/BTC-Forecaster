@@ -2,8 +2,7 @@ import streamlit as st
 import requests
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+import plotly.graph_objects as go
 import scipy.stats as stats
 from arch import arch_model
 import json, os
@@ -17,62 +16,56 @@ st.set_page_config(
     layout="wide"
 )
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
-}
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
 .main-title {
     font-family: 'Space Mono', monospace;
-    font-size: 2.4rem;
+    font-size: 2.2rem;
     font-weight: 700;
     letter-spacing: -1px;
     margin-bottom: 0;
     color: #F7931A;
 }
-
 .subtitle {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     color: #888;
     margin-top: 0;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.2rem;
     font-family: 'Space Mono', monospace;
 }
-
 .metric-card {
     background: #1a1a2e;
     border: 1px solid #2a2a4a;
     border-radius: 12px;
-    padding: 1.2rem 1.5rem;
+    padding: 1rem 1.2rem;
     margin-bottom: 1rem;
+    min-height: 100px;
 }
-
 .metric-label {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: #888;
     text-transform: uppercase;
     letter-spacing: 1px;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    font-family: 'Inter', sans-serif;
 }
-
 .metric-value {
     font-family: 'Space Mono', monospace;
-    font-size: 1.8rem;
+    font-size: 1.45rem;
     font-weight: 700;
     color: #ffffff;
+    word-break: break-word;
 }
-
 .metric-value.orange { color: #F7931A; }
 .metric-value.green  { color: #00d4aa; }
-.metric-value.red    { color: #ff6b6b; }
 
 .section-header {
     font-family: 'Space Mono', monospace;
-    font-size: 1rem;
+    font-size: 0.85rem;
     font-weight: 700;
     color: #F7931A;
     text-transform: uppercase;
@@ -81,42 +74,77 @@ html, body, [class*="css"] {
     padding-bottom: 0.5rem;
     margin: 2rem 0 1rem 0;
 }
-
 .countdown-box {
     background: linear-gradient(135deg, #1a1a2e, #16213e);
     border: 1px solid #F7931A44;
     border-radius: 8px;
-    padding: 0.6rem 1.2rem;
+    padding: 0.5rem 1.2rem;
     display: inline-block;
     font-family: 'Space Mono', monospace;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     color: #F7931A;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
 }
-
 .updated-tag {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: #555;
     font-family: 'Space Mono', monospace;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.2rem;
 }
-
 .badge {
     display: inline-block;
     padding: 2px 10px;
     border-radius: 20px;
-    font-size: 0.72rem;
+    font-size: 0.70rem;
     font-family: 'Space Mono', monospace;
     font-weight: 700;
 }
-
-.badge-green { background: #00d4aa22; color: #00d4aa; border: 1px solid #00d4aa44; }
+.badge-green  { background: #00d4aa22; color: #00d4aa; border: 1px solid #00d4aa44; }
 .badge-orange { background: #F7931A22; color: #F7931A; border: 1px solid #F7931A44; }
+
+.coverage-bar-wrap {
+    background: #2a2a4a;
+    border-radius: 6px;
+    height: 6px;
+    margin-top: 10px;
+    width: 100%;
+}
+.coverage-bar-fill {
+    height: 6px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #00d4aa, #F7931A);
+}
+.model-pill {
+    display: inline-block;
+    background: #F7931A18;
+    border: 1px solid #F7931A33;
+    border-radius: 20px;
+    padding: 3px 12px;
+    font-size: 0.72rem;
+    font-family: 'Space Mono', monospace;
+    color: #F7931A;
+    margin-right: 6px;
+    margin-bottom: 6px;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── Helper functions ──────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+PLOTLY_LAYOUT = dict(
+    paper_bgcolor='#0e0e1a',
+    plot_bgcolor='#0e0e1a',
+    font=dict(color='#888', family='Space Mono, monospace', size=11),
+    xaxis=dict(gridcolor='#1e1e30', showgrid=True, zeroline=False),
+    yaxis=dict(gridcolor='#1e1e30', showgrid=True, zeroline=False),
+    legend=dict(bgcolor='#1a1a2e', bordercolor='#2a2a4a', borderwidth=1,
+                font=dict(color='white', size=10)),
+    hovermode='x unified',
+    hoverlabel=dict(bgcolor='#1a1a2e', bordercolor='#F7931A',
+                    font=dict(color='white', family='Space Mono')),
+    margin=dict(l=60, r=20, t=20, b=60),
+)
 
 @st.cache_data(ttl=3600)
 def fetch_btc(limit=600):
@@ -146,28 +174,20 @@ def predict_next_hour(prices):
     sigma_fig = res.conditional_volatility / 100
     resid = (log_ret * 100 - res.params['mu']) / res.conditional_volatility
     nu = max(4, stats.t.fit(resid, floc=0, fscale=1)[0])
-
     H = rolling_entropy(resid)
     M = log_ret.abs().rolling(60).mean()
-    bar_sigma2 = (sigma_fig**2).mean()
-    redundancy = 1 + 0.1 * np.log1p(prices.rolling(5).var() / prices.rolling(20).var())
-    info_filter = (H > H.mean()).astype(float)
-
     S0 = prices.iloc[-1]
     mu = log_ret.mean()
-
     H_max = H.max() if H.max() > 0 else 1.0
     M_max = M.max() if M.max() > 0 else 1.0
     H_val = min(H.iloc[-1] / H_max, 1.0)
     M_val = min(M.iloc[-1] / M_max, 1.0)
     crisis = (H_val > 0.8) or (M_val > 0.8)
-
     α0, δ0 = 0.5, 0.3
     sigma2_last = sigma_fig.iloc[-1]**2 * 0.85
     delta_t = δ0 if crisis else 0.0
     sigma2 = sigma2_last * (1 + α0 * H_val + delta_t * M_val)
     sigma2 = max(1e-6, min(sigma2, 0.5))
-
     n_sims = 10000
     Z = np.random.standard_t(nu, size=n_sims) * np.sqrt((nu - 2) / nu)
     S1 = S0 * np.exp((mu - 0.5 * sigma2) + np.sqrt(sigma2) * Z)
@@ -182,125 +202,144 @@ def load_backtest_metrics():
         for line in f:
             rows.append(json.loads(line))
     df = pd.DataFrame(rows)
-    coverage     = df["coverage_95"].mean()
-    avg_width    = df["width_95"].mean()
-    mean_winkler = df["winkler"].mean()
-    return coverage, avg_width, mean_winkler
+    return df["coverage_95"].mean(), df["width_95"].mean(), df["winkler"].mean()
 
 def get_sheet():
     scope = ["https://spreadsheets.google.com/feeds",
              "https://www.googleapis.com/auth/drive"]
-    creds_dict = st.secrets["gcp_service_account"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-    client = gspread.authorize(creds)
-    return client.open("BTC Predictions").sheet1
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=scope)
+    return gspread.authorize(creds).open("BTC Predictions").sheet1
 
 def save_prediction(sheet, S0, lower, upper):
     IST = timezone(timedelta(hours=5, minutes=30))
-    row = [
+    sheet.append_row([
         datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST"),
-        round(S0, 2),
-        round(lower, 2),
-        round(upper, 2),
-        round(upper - lower, 2)
-    ]
-    sheet.append_row(row)
+        round(S0, 2), round(lower, 2), round(upper, 2), round(upper - lower, 2)
+    ])
 
 def load_history(sheet):
     records = sheet.get_all_records()
-    return pd.DataFrame(records)
+    df = pd.DataFrame(records)
+    if not df.empty:
+        for col in ["S0", "lower_95", "upper_95", "width"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").round(2)
+    return df
 
 def next_candle_countdown():
     IST = timezone(timedelta(hours=5, minutes=30))
     now = datetime.now(IST)
     next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     diff = next_hour - now
-    mins = diff.seconds // 60
-    secs = diff.seconds % 60
-    return mins, secs
+    return diff.seconds // 60, diff.seconds % 60
 
 
-# ── MAIN UI ───────────────────────────────────────────────────────────────────
+# ── UI ────────────────────────────────────────────────────────────────────────
 
 st.markdown('<div class="main-title">₿ BTC/USDT — Next Hour Forecast</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Model: Cyber-GBM · FIGARCH Volatility · Student-t Fat Tails</div>', unsafe_allow_html=True)
 
-# Countdown
 mins, secs = next_candle_countdown()
 st.markdown(f'<div class="countdown-box">⏱ Next candle closes in {mins}m {secs}s</div>', unsafe_allow_html=True)
 
-# Fetch & predict
 with st.spinner("Fetching live BTC data and running model..."):
     prices = fetch_btc(limit=500)
     S0, lower, upper = predict_next_hour(prices)
 
 IST = timezone(timedelta(hours=5, minutes=30))
-st.markdown(f'<div class="updated-tag">Last updated: {datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")}</div>', unsafe_allow_html=True)
+st.markdown(
+    f'<div class="updated-tag">Last updated: {datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")}</div>',
+    unsafe_allow_html=True
+)
 
 # ── Metric cards ──────────────────────────────────────────────────────────────
-col1, col2, col3, col4 = st.columns(4)
+c1, c2, c3, c4 = st.columns(4)
+cards = [
+    (c1, "Current BTC Price",     f"${S0:,.2f}",          "orange"),
+    (c2, "Predicted Lower (95%)", f"${lower:,.2f}",        ""),
+    (c3, "Predicted Upper (95%)", f"${upper:,.2f}",        ""),
+    (c4, "Range Width",           f"${upper-lower:,.2f}",  "green"),
+]
+for col, label, value, cls in cards:
+    with col:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value {cls}">{value}</div>
+        </div>""", unsafe_allow_html=True)
 
-with col1:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Current BTC Price</div>
-        <div class="metric-value orange">${S0:,.2f}</div>
-    </div>""", unsafe_allow_html=True)
+# ── Model info expander ───────────────────────────────────────────────────────
+with st.expander("ℹ️ How this model works"):
+    st.markdown("""
+    <div style="font-size:0.85rem; color:#aaa; line-height:1.7;">
+    <span class="model-pill">No Peeking</span>
+    <span class="model-pill">Fat Tails</span>
+    <span class="model-pill">Volatility Clustering</span>
+    <br><br>
+    <b style="color:#F7931A;">No Peeking</b> — When predicting bar N, the model only uses data up to bar N-1.
+    The actual price is revealed only after the prediction is locked in, preventing any data leakage.<br><br>
+    <b style="color:#F7931A;">Fat Tails</b> — Bitcoin has frequent large moves that a normal distribution underestimates.
+    We use a Student-t distribution (fitted from residuals) to correctly account for extreme price swings.<br><br>
+    <b style="color:#F7931A;">Volatility Clustering</b> — FIGARCH volatility model captures the fact that calm hours
+    cluster together and volatile hours cluster together. The predicted range widens automatically during turbulent periods.
+    </div>
+    """, unsafe_allow_html=True)
 
-with col2:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Predicted Lower (95%)</div>
-        <div class="metric-value">${lower:,.2f}</div>
-    </div>""", unsafe_allow_html=True)
-
-with col3:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Predicted Upper (95%)</div>
-        <div class="metric-value">${upper:,.2f}</div>
-    </div>""", unsafe_allow_html=True)
-
-with col4:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Range Width</div>
-        <div class="metric-value green">${upper - lower:,.2f}</div>
-    </div>""", unsafe_allow_html=True)
-
-# ── Chart ─────────────────────────────────────────────────────────────────────
+# ── Main chart — INTERACTIVE ──────────────────────────────────────────────────
 st.markdown('<div class="section-header">Last 50 Bars + Predicted Range</div>', unsafe_allow_html=True)
 
 last50 = prices.tail(50)
-fig, ax = plt.subplots(figsize=(13, 4))
-fig.patch.set_facecolor('#0e0e1a')
-ax.set_facecolor('#0e0e1a')
+times  = last50.index.tolist()
+closes = last50.values.tolist()
 
-ax.plot(last50.index, last50.values, color='#F7931A', linewidth=1.8, zorder=3, label='BTC Price')
-ax.fill_between(last50.index,
-                [lower] * len(last50),
-                [upper] * len(last50),
-                alpha=0.15, color='#00d4aa', zorder=1)
-ax.axhline(lower, color='#00d4aa', linestyle='--', linewidth=0.8, alpha=0.7)
-ax.axhline(upper, color='#00d4aa', linestyle='--', linewidth=0.8, alpha=0.7)
-ax.axhline(S0,    color='#ffffff', linestyle=':',  linewidth=0.6, alpha=0.3)
+fig1 = go.Figure()
 
-ax.tick_params(colors='#666', labelsize=8)
-ax.spines['bottom'].set_color('#2a2a4a')
-ax.spines['left'].set_color('#2a2a4a')
-ax.spines['top'].set_visible(False)
-ax.spines['right'].set_visible(False)
-ax.set_ylabel("Price (USDT)", color='#666', fontsize=8)
-ax.yaxis.label.set_color('#666')
+# Shaded range ribbon
+fig1.add_trace(go.Scatter(
+    x=times + times[::-1],
+    y=[upper]*len(times) + [lower]*len(times),
+    fill='toself',
+    fillcolor='rgba(0,212,170,0.12)',
+    line=dict(color='rgba(0,0,0,0)'),
+    hoverinfo='skip',
+    name='95% range',
+    showlegend=True
+))
 
-patch = mpatches.Patch(color='#00d4aa', alpha=0.4, label='95% next-hour range')
-ax.legend(handles=[ax.lines[0], patch],
-          facecolor='#1a1a2e', edgecolor='#2a2a4a',
-          labelcolor='white', fontsize=8)
+# Upper bound dashed line
+fig1.add_trace(go.Scatter(
+    x=times, y=[upper]*len(times),
+    mode='lines',
+    line=dict(color='#00d4aa', width=1, dash='dash'),
+    hovertemplate=f'Upper: ${upper:,.2f}<extra></extra>',
+    name=f'Upper ${upper:,.2f}'
+))
 
-plt.xticks(rotation=25)
-plt.tight_layout()
-st.pyplot(fig)
+# Lower bound dashed line
+fig1.add_trace(go.Scatter(
+    x=times, y=[lower]*len(times),
+    mode='lines',
+    line=dict(color='#00d4aa', width=1, dash='dash'),
+    hovertemplate=f'Lower: ${lower:,.2f}<extra></extra>',
+    name=f'Lower ${lower:,.2f}'
+))
+
+# BTC price line
+fig1.add_trace(go.Scatter(
+    x=times, y=closes,
+    mode='lines',
+    line=dict(color='#F7931A', width=2),
+    hovertemplate='%{x|%b %d %H:%M}<br>BTC: $%{y:,.2f}<extra></extra>',
+    name='BTC Price'
+))
+
+fig1.update_layout(
+    **PLOTLY_LAYOUT,
+    height=380,
+    yaxis_title="Price (USDT)",
+)
+st.plotly_chart(fig1, use_container_width=True)
 
 # ── Backtest metrics ──────────────────────────────────────────────────────────
 st.markdown('<div class="section-header">Backtest Metrics — Part A</div>', unsafe_allow_html=True)
@@ -309,14 +348,19 @@ coverage, avg_width, mean_winkler = load_backtest_metrics()
 if coverage is not None:
     b1, b2, b3 = st.columns(3)
     delta_cov = coverage - 0.95
-    badge = f'<span class="badge badge-green">+{delta_cov:.4f} vs target</span>' if delta_cov > 0 else f'<span class="badge badge-orange">{delta_cov:.4f} vs target</span>'
+    badge_cls = "badge-green" if delta_cov > 0 else "badge-orange"
+    badge_txt = f"+{delta_cov:.4f} vs target" if delta_cov > 0 else f"{delta_cov:.4f} vs target"
+    bar_pct   = min(coverage / 1.0 * 100, 100)
 
     with b1:
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-label">Coverage (target 0.95)</div>
             <div class="metric-value">{coverage:.4f}</div>
-            {badge}
+            <span class="badge {badge_cls}">{badge_txt}</span>
+            <div class="coverage-bar-wrap">
+                <div class="coverage-bar-fill" style="width:{bar_pct}%"></div>
+            </div>
         </div>""", unsafe_allow_html=True)
     with b2:
         st.markdown(f"""
@@ -333,49 +377,68 @@ if coverage is not None:
 else:
     st.info("Upload backtest_results.jsonl to see metrics.")
 
-# ── Prediction History ────────────────────────────────────────────────────────
+# ── Prediction History — INTERACTIVE ─────────────────────────────────────────
 st.markdown('<div class="section-header">Prediction History — Part C</div>', unsafe_allow_html=True)
 
 try:
-    sheet = get_sheet()
+    sheet   = get_sheet()
     save_prediction(sheet, S0, lower, upper)
     history = load_history(sheet)
 
-    st.dataframe(
-        history.style.set_properties(**{
-            'background-color': '#1a1a2e',
-            'color': 'white',
-            'border': '1px solid #2a2a4a'
-        }),
-        use_container_width=True
-    )
+    st.dataframe(history, use_container_width=True)
 
     if len(history) > 1:
-        fig2, ax2 = plt.subplots(figsize=(13, 3))
-        fig2.patch.set_facecolor('#0e0e1a')
-        ax2.set_facecolor('#0e0e1a')
+        fig2 = go.Figure()
 
-        x = range(len(history))
-        ax2.plot(x, history["S0"], color='#F7931A', linewidth=1.5, label='BTC at prediction time', zorder=3)
-        ax2.fill_between(x, history["lower_95"], history["upper_95"],
-                         alpha=0.15, color='#00d4aa', zorder=1)
-        ax2.axhline(history["lower_95"].iloc[-1], color='#00d4aa', linestyle='--', linewidth=0.7, alpha=0.5)
-        ax2.axhline(history["upper_95"].iloc[-1], color='#00d4aa', linestyle='--', linewidth=0.7, alpha=0.5)
+        x_vals = list(range(len(history)))
 
-        ax2.tick_params(colors='#666', labelsize=8)
-        ax2.spines['bottom'].set_color('#2a2a4a')
-        ax2.spines['left'].set_color('#2a2a4a')
-        ax2.spines['top'].set_visible(False)
-        ax2.spines['right'].set_visible(False)
-        ax2.set_xlabel("Visit number", color='#666', fontsize=8)
-        ax2.set_ylabel("Price (USDT)", color='#666', fontsize=8)
+        # Shaded predicted range
+        fig2.add_trace(go.Scatter(
+            x=x_vals + x_vals[::-1],
+            y=history["upper_95"].tolist() + history["lower_95"].tolist()[::-1],
+            fill='toself',
+            fillcolor='rgba(0,212,170,0.12)',
+            line=dict(color='rgba(0,0,0,0)'),
+            hoverinfo='skip',
+            name='Predicted range'
+        ))
 
-        patch2 = mpatches.Patch(color='#00d4aa', alpha=0.4, label='Predicted range')
-        ax2.legend(handles=[ax2.lines[0], patch2],
-                   facecolor='#1a1a2e', edgecolor='#2a2a4a',
-                   labelcolor='white', fontsize=8)
-        plt.tight_layout()
-        st.pyplot(fig2)
+        # Upper / lower dashed
+        fig2.add_trace(go.Scatter(
+            x=x_vals, y=history["upper_95"],
+            mode='lines',
+            line=dict(color='#00d4aa', width=1, dash='dash'),
+            hovertemplate='Upper: $%{y:,.2f}<extra></extra>',
+            name='Upper 95%'
+        ))
+        fig2.add_trace(go.Scatter(
+            x=x_vals, y=history["lower_95"],
+            mode='lines',
+            line=dict(color='#00d4aa', width=1, dash='dash'),
+            hovertemplate='Lower: $%{y:,.2f}<extra></extra>',
+            name='Lower 95%'
+        ))
+
+        # BTC price at prediction time
+        fig2.add_trace(go.Scatter(
+            x=x_vals, y=history["S0"],
+            mode='lines+markers',
+            line=dict(color='#F7931A', width=2),
+            marker=dict(size=5, color='#F7931A'),
+            hovertemplate=(
+                'Visit %{x}<br>'
+                'BTC: $%{y:,.2f}<extra></extra>'
+            ),
+            name='BTC at prediction time'
+        ))
+
+        fig2.update_layout(
+            **PLOTLY_LAYOUT,
+            height=300,
+            xaxis_title="Visit number",
+            yaxis_title="Price (USDT)",
+        )
+        st.plotly_chart(fig2, use_container_width=True)
 
 except Exception as e:
     st.warning(f"History unavailable: {e}")
