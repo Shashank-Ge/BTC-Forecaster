@@ -6,6 +6,9 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 from arch import arch_model
 import json, os
+import gspread
+from google.oauth2.service_account
+import Credentials
 
 st.set_page_config(page_title="BTC Next-Hour Forecast", layout="wide")
 
@@ -78,6 +81,31 @@ def load_backtest_metrics():
     mean_winkler = df["winkler"].mean()
     return coverage, avg_width, mean_winkler
 
+def get_sheet():
+    scope = ["https://spreadsheets.google.com/feeds",
+             "https://www.googleapis.com/auth/drive"]
+    creds_dict = st.secrets["gcp_service_account"]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    client = gspread.authorize(creds)
+    sheet = client.open("BTC Predictions").sheet1
+    return sheet
+
+def save_prediction(sheet, S0, lower, upper):
+    from datetime import datetime
+    row = [
+        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        round(S0, 2),
+        round(lower, 2),
+        round(upper, 2),
+        round(upper - lower, 2)
+    ]
+    sheet.append_row(row)
+
+def load_history(sheet):
+    records = sheet.get_all_records()
+    return pd.DataFrame(records)
+
+
 # --- UI ---
 st.title("₿ BTC/USDT — Next Hour Forecast")
 st.caption("Model: Cyber-GBM with FIGARCH volatility + Student-t tails")
@@ -116,3 +144,27 @@ if coverage is not None:
     m3.metric("Mean Winkler Score", f"{mean_winkler:,.2f}")
 else:
     st.info("Run the backtest in Colab first and upload backtest_results.jsonl to see metrics here.")
+
+
+
+# Part C — Prediction History
+try:
+    sheet = get_sheet()
+    save_prediction(sheet, S0, lower, upper)
+    history = load_history(sheet)
+
+    st.subheader("Prediction History (Part C)")
+    st.dataframe(history)
+
+    if len(history) > 1:
+        fig2, ax2 = plt.subplots(figsize=(12, 3))
+        ax2.plot(range(len(history)), history["S0"], label="BTC at prediction time", color="steelblue")
+        ax2.fill_between(range(len(history)), history["lower_95"], history["upper_95"],
+                         alpha=0.3, color="orange", label="Predicted range")
+        ax2.set_xlabel("Visit number")
+        ax2.set_ylabel("Price (USDT)")
+        ax2.legend()
+        plt.tight_layout()
+        st.pyplot(fig2)
+except Exception as e:
+    st.warning(f"History unavailable: {e}")
