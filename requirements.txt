@@ -5,3 +5,5 @@ pandas
 matplotlib
 arch
 scipy
+gspread
+google-auth
