@@ -7,8 +7,7 @@ import scipy.stats as stats
 from arch import arch_model
 import json, os
 import gspread
-from google.oauth2.service_account
-import Credentials
+from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="BTC Next-Hour Forecast", layout="wide")
 
