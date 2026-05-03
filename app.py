@@ -90,9 +90,10 @@ def get_sheet():
     return sheet
 
 def save_prediction(sheet, S0, lower, upper):
-    from datetime import datetime
+    from datetime import datetime, timezone, timedelta
+    IST = timezone(timedelta(hours=5, minutes=30))
     row = [
-        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST"),
         round(S0, 2),
         round(lower, 2),
         round(upper, 2),
